@@ -1,0 +1,147 @@
+#include <SHT1x.h>              //Librería sensor
+
+#define INPUT_SIZE 1000         //Tamaño máximo de caracteres que tendrá la información recibida
+
+#define dataPin  7 
+#define clockPin 4
+SHT1x sht1x(dataPin, clockPin); //Constructor sensor
+float temp_c;                   //Variable almacena temperatura
+float humidity;                 //Var almacena HR
+
+const int ICPin = 5;            // Motor altura
+const int IDPin = 6; 
+const int EnablePin2 = 3;
+const int potAltura = A1;
+
+const int IAPin = 9;            // Motor avance (+ motor altura)
+const int IBPin = 10; 
+const int EnablePin1 =  8;
+const int potAvance = A0; 
+
+const int IEPin = 12;           // Motor giro. Driver 2 - INA
+const int IFPin = 13;           // Driver 2 - INB
+const int EnablePin3 =  11;     // Driver 2 - EnableA
+const int potGiro = A2;
+
+int alturaOrigen = 445;
+int giroOrigen = 200;
+int avanceOrigen = 440;
+
+int alturaReal, avanceReal, giroReal;   //Vars almacenan las posiciones reales en las que se encuentran los potenciómetros
+//int alturaConsigna, avanceConsigna, giroConsigna;
+
+int horqAltura = 8;                     //Errores de precisión de los movimientos permitidos
+int horqAvance = 4;
+int horqGiro = 3;
+
+int pwmAltura, pwmAvance, pwmGiro;      //Valores de ampl pulso de los motores
+
+int valIntAlt,valIntAvan, valIntGiro;   //Vars integrales lecturas de potenciómetros
+int integral=40;                        //Número de veces que se lee un valor para hacer la media
+
+char buffers;                           //Var almacén de lo leído
+int posX[60],posY[60], posZ[60];        //almacen de variables recibidas
+int contadora = 0;                      //Variable contadora de puntos recibidos
+int realContadora = 0;                  //Var contadora de puntos muestreados
+char cadena[100];                       //variable almacén de cadena recibida por el puerto serie
+
+int alturaConsigna[60];               //Vars a donde queremos ir
+int avanceConsigna[60];
+int giroConsigna[60];
+
+boolean escucha = true;                //Control de la escucha y del movimiento
+boolean mueve = true;
+boolean convierte = false;
+
+void setup() {
+  alturaConsigna[0] = alturaOrigen;
+  avanceConsigna[0] = avanceOrigen;
+  giroConsigna[0] = giroOrigen;
+  
+  pinMode(IAPin, OUTPUT);               //Declaraciones de pines de salida
+  pinMode(IBPin, OUTPUT);
+  pinMode(EnablePin1, OUTPUT);
+  pinMode(ICPin, OUTPUT);
+  pinMode(IDPin, OUTPUT);
+  pinMode(EnablePin2, OUTPUT);
+  pinMode(IEPin,OUTPUT);
+  pinMode(IFPin,OUTPUT);
+  pinMode(EnablePin3,OUTPUT);
+
+  Serial.begin(9600);                   //Inicio comunicación serial
+  Serial1.begin(9600);
+  *cadena=0;
+}
+
+void loop() {
+  //Lectura puerto serie-------------------------------------------------------------- 
+  if (escucha == true && mueve == false)              //Condición para que se proceda a la escucha por el puerto serie
+  {             
+   // Serial.println("escucha");
+    char input[INPUT_SIZE];                           //Variable local en la que se almacenará lo que se lea por el puerto
+
+    if(Serial.available()>0)
+    {
+      byte size = Serial.readBytes(input, INPUT_SIZE);  //Lee del puerto serial y almacena en input con el tamaño INPUT_SIZE predefinido
+    }
+    
+    if(Serial1.available()>0)
+    {
+      byte size = Serial1.readBytes(input, INPUT_SIZE);  //Lee del puerto serial y almacena en input con el tamaño INPUT_SIZE predefinido
+    }
+    //QUITAR??  input[size] = '#';                    //Añade al final de la cadena recibida # para indicar el fin
+    
+    //La estructura de la información relativa a las posiciones que se va a recibir por el puerto serie es:
+    // *X1,Y1,Z1&X2,Y2,Z2&....&Xn,Yn,Zn
+           
+    if ((input[0])== '*'){                            //Si el primer caracter es *
+      //input[size]= ' ';
+      input[0]= ' ';                                  //Quita el * y lo sustituye por un espacio blanco                 
+
+      char* grupoAcciones = strtok(input, "&");       // Lee cada acción separadas por &
+      
+      contadora = 0;
+      realContadora = 0;
+      while (grupoAcciones != 0)
+      {
+        //Serial.println("escuchannndoooooooo");
+          //Separa las acciones para el grupo X e Y
+          char* separador = strchr(grupoAcciones, ',');
+          if (separador != 0)
+          {
+              *separador = 0;                           //Divide la cadena en dos sustituyendo ',' por '0'
+              posX[contadora] = atoi(grupoAcciones);            
+              
+              ++separador;                              //Suma uno a su posición(antes se encontraba en ',' que pasó a ser '0'
+              posY [contadora]= atoi(separador);
+              
+              separador =strchr(separador, ',');        //Busca la siguiente coma
+              ++separador;                              //y añade uno a su posición
+              posZ [contadora] = atoi(separador);
+
+              contadora++;
+          }    
+          
+         grupoAcciones = strtok(0, "&");                // Encuentra el siguiente comando separado por & partiendo del último comando que encontró
+      }
+      mueve = true;
+      escucha = false;
+      convierte = true;
+    }
+  }
+//Lectura puerto serie FIN--------------------------------------------------------------
+  if(mueve==true && escucha == false && convierte == true){
+    ConversionCoordenadas();                  //Función conversión de coordenadas
+  }
+
+  if(mueve==true){
+    
+    AlturaMovimiento();
+    
+    Giro();                                   //Función movimiento giro -> Segundo movimiento
+  
+    Avance();                                 //Función movimiento avance -> Tercer movimiento
+
+    Altura();                                 //Función movimiento altura -> Primer movimiento
+  }
+}
